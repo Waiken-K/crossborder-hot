@@ -20,7 +20,7 @@ const provider = await stub((_hit, req) => {
   const user = String(body.messages.at(-1)!.content);
   seen.push({ model: body.model, system });
   const content =
-    system.includes("宽召回") ? { label: "PASS", reason: "测试" }
+    system.includes("宽召回的跨境相关性预筛") ? { label: "PASS", reason: "测试" }
     : system.includes("跨境决策价值评分器") ? { attentionScore: 80 }
     : system.includes("内容理解编辑") ? { itemType: "service_change", authorRole: "principal", tags: ["产品/规则更新"], editorialJudgment: "理由", titleZh: "一条服务规则的标题", summaryZh: "服务规则发生变化。第二句补充适用条件。" }
     : system.includes("资料结构化助手") ? { category: "accounts", tags: ["产品/规则更新"], subjects: [], fact: null }
