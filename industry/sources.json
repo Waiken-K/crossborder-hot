@@ -1,388 +1,127 @@
 {
-  "$comment": "示范信源：首次启动时导入（scripts/seed.ts），已存在的不会被覆盖。之后在后台“信源”里增删改。字段说明见 docs/customize.md。",
+  "$comment": "跨境热点首批信号源。来源池来自运营飞书表；这里只启用已实际试抓通过的官方源。需要付费 API 的 X 线索源先保留为 disabled。",
   "sources": [
     {
-      "id": "rss-openai-news",
-      "name": "OpenAI News",
+      "id": "rss-wise-status",
+      "name": "Wise Status",
       "kind": "rss",
-      "config": {
-        "feedUrl": "https://openai.com/news/rss.xml",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T1",
-      "first_party": true,
-      "owner_entity_id": "openai",
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "官方"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
+      "config": { "feedUrl": "https://status.wise.com/history.atom", "_aihot": { "initialBackfillLimit": 12 } },
+      "tier": "T1", "first_party": true, "owner_entity_id": "wise", "participation_mode": "editorial",
+      "interval_minutes": 60, "tags": ["官方", "Wise", "风险/故障"], "site_fulltext": false, "syndicate_fulltext": false
     },
     {
-      "id": "rss-google-deepmind",
-      "name": "Google DeepMind",
+      "id": "rss-sec-press-releases",
+      "name": "美国证券交易委员会（SEC）",
       "kind": "rss",
-      "config": {
-        "feedUrl": "https://deepmind.google/blog/rss.xml",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T1",
-      "first_party": true,
-      "owner_entity_id": "google",
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "官方"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
+      "config": { "feedUrl": "https://www.sec.gov/news/pressreleases.rss", "_aihot": { "initialBackfillLimit": 12 } },
+      "tier": "T1", "first_party": true, "owner_entity_id": null, "participation_mode": "editorial",
+      "interval_minutes": 180, "tags": ["监管机构", "政策/监管", "美国"], "site_fulltext": false, "syndicate_fulltext": false
     },
     {
-      "id": "rss-google-research",
-      "name": "Google Research",
-      "kind": "rss",
+      "id": "web-finra-news-releases",
+      "name": "美国金融业监管局（FINRA）",
+      "kind": "web_list",
       "config": {
-        "feedUrl": "https://research.google/blog/rss/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
+        "url": "https://www.finra.org/media-center/newsreleases", "parseMode": "html",
+        "itemSelector": ".views-infinite-scroll-content-wrapper > .views-row",
+        "linkSelector": ".views-field-title a", "titleSelector": ".views-field-title a",
+        "publishedAtSelector": ".views-field-field-core-official-dt time",
+        "allowUrlPrefixes": ["https://www.finra.org/media-center/newsreleases/"],
+        "_aihot": { "initialBackfillLimit": 10 }
       },
-      "tier": "T1",
-      "first_party": true,
-      "owner_entity_id": "google",
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "官方",
-        "研究"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
+      "tier": "T1", "first_party": true, "owner_entity_id": null, "participation_mode": "editorial",
+      "interval_minutes": 180, "tags": ["监管机构", "券商", "美国"], "site_fulltext": false, "syndicate_fulltext": false
     },
     {
-      "id": "rss-hugging-face",
-      "name": "Hugging Face Blog",
+      "id": "rss-cfpb-newsroom",
+      "name": "美国消费者金融保护局（CFPB）",
       "kind": "rss",
-      "config": {
-        "feedUrl": "https://huggingface.co/blog/feed.xml",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T1",
-      "first_party": true,
-      "owner_entity_id": "hugging-face",
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "官方",
-        "开源"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
+      "config": { "feedUrl": "https://www.consumerfinance.gov/about-us/newsroom/feed/", "_aihot": { "initialBackfillLimit": 12 } },
+      "tier": "T1", "first_party": true, "owner_entity_id": null, "participation_mode": "editorial",
+      "interval_minutes": 120, "tags": ["监管机构", "金融消费者", "美国"], "site_fulltext": false, "syndicate_fulltext": false
     },
     {
-      "id": "rss-microsoft-research",
-      "name": "Microsoft Research",
-      "kind": "rss",
+      "id": "web-irs-newsroom",
+      "name": "IRS（美国国税局）Newsroom",
+      "kind": "web_list",
       "config": {
-        "feedUrl": "https://www.microsoft.com/en-us/research/feed/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
+        "url": "https://www.irs.gov/newsroom", "parseMode": "html",
+        "itemSelector": ".block-views-blocknewsroom-articles-latest-news-releases-block .views-row",
+        "linkSelector": "h3 a", "titleSelector": "h3 a",
+        "publishedAtRegex": "(?:IR-[0-9-]+,\\s*)?([A-Z][a-z]{2,8}\\.?\\s*\\d{1,2},\\s+\\d{4})",
+        "publishedAtUtcOffset": "-04:00", "allowUrlPrefixes": ["https://www.irs.gov/newsroom/"],
+        "_aihot": { "initialBackfillLimit": 15 }
       },
-      "tier": "T1",
-      "first_party": true,
-      "owner_entity_id": "microsoft",
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "官方",
-        "研究"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
+      "tier": "T1", "first_party": true, "owner_entity_id": "irs", "participation_mode": "editorial",
+      "interval_minutes": 180, "tags": ["监管机构", "ITIN", "美国税务"], "site_fulltext": false, "syndicate_fulltext": false
     },
     {
-      "id": "rss-nvidia-blog",
-      "name": "NVIDIA Blog",
-      "kind": "rss",
+      "id": "web-hkma-press-releases",
+      "name": "香港金融管理局（HKMA）",
+      "kind": "web_list",
       "config": {
-        "feedUrl": "https://blogs.nvidia.com/feed/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
+        "url": "https://www.hkma.gov.hk/eng/news-and-media/press-releases/", "parseMode": "html",
+        "itemSelector": "#press-release-result > ul", "linkSelector": "li a", "titleSelector": "li a",
+        "publishedAtSelector": "li:first-child", "publishedAtUtcOffset": "+08:00",
+        "allowUrlPrefixes": ["https://www.hkma.gov.hk/eng/news-and-media/press-releases/"],
+        "_aihot": { "initialBackfillLimit": 12 }
       },
-      "tier": "T1",
-      "first_party": true,
-      "owner_entity_id": "nvidia",
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "官方"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
+      "tier": "T1", "first_party": true, "owner_entity_id": null, "participation_mode": "editorial",
+      "interval_minutes": 120, "tags": ["监管机构", "香港银行", "政策/监管"], "site_fulltext": false, "syndicate_fulltext": false
     },
     {
-      "id": "rss-aws-ml",
-      "name": "AWS Machine Learning Blog",
-      "kind": "rss",
+      "id": "web-iras-newsroom",
+      "name": "新加坡国内税务局（IRAS）",
+      "kind": "web_list",
       "config": {
-        "feedUrl": "https://aws.amazon.com/blogs/machine-learning/feed/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
+        "url": "https://www.iras.gov.sg/news-events/newsroom", "parseMode": "html",
+        "itemSelector": ".eyd-listing-results__articles > article.eyd-article-item", "linkSelector": "h3 a", "titleSelector": "h3 a",
+        "publishedAtSelector": ".eyd-article-item__meta--date", "publishedAtUtcOffset": "+08:00",
+        "allowUrlPrefixes": ["https://www.iras.gov.sg/news-events/newsroom/"],
+        "_aihot": { "initialBackfillLimit": 12 }
       },
-      "tier": "T1",
-      "first_party": true,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "官方",
-        "教程"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
+      "tier": "T1", "first_party": true, "owner_entity_id": null, "participation_mode": "editorial",
+      "interval_minutes": 180, "tags": ["监管机构", "新加坡税务", "政策/监管"], "site_fulltext": false, "syndicate_fulltext": false
     },
     {
-      "id": "rss-github-ai",
-      "name": "GitHub Blog · AI & ML",
-      "kind": "rss",
+      "id": "web-ofac-recent-actions",
+      "name": "美国财政部 OFAC 制裁公告",
+      "kind": "web_list",
       "config": {
-        "feedUrl": "https://github.blog/ai-and-ml/feed/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
+        "url": "https://ofac.treasury.gov/recent-actions", "parseMode": "html",
+        "itemSelector": ".view-recent-actions-search .view-content > .search-result.views-row",
+        "linkSelector": ".font-sans-lg a", "titleSelector": ".font-sans-lg a",
+        "publishedAtRegex": "([A-Z][a-z]+\\s+\\d{2},\\s+\\d{4})", "publishedAtUtcOffset": "-04:00",
+        "allowUrlPrefixes": ["https://ofac.treasury.gov/recent-actions/"],
+        "denyUrlPrefixes": ["https://ofac.treasury.gov/recent-actions/sanctions-list-updates"],
+        "_aihot": { "initialBackfillLimit": 10 }
       },
-      "tier": "T1",
-      "first_party": true,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "官方"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
+      "tier": "T1", "first_party": true, "owner_entity_id": null, "participation_mode": "editorial",
+      "interval_minutes": 120, "tags": ["监管机构", "制裁", "风险/故障"], "site_fulltext": false, "syndicate_fulltext": false
     },
     {
-      "id": "rss-mistral",
-      "name": "Mistral AI",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://mistral.ai/rss.xml",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T1",
-      "first_party": true,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "官方"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
+      "id": "x-lz-rational-invest", "name": "X · @LZRationalnvest（跨境税务与资产讨论）", "kind": "x_search",
+      "config": { "query": "from:LZRationalnvest -filter:replies", "searchType": "Latest", "_aihot": { "initialBackfillLimit": 8 } },
+      "tier": "T2", "first_party": false, "owner_entity_id": null, "participation_mode": "hot_signal", "interval_minutes": 120,
+      "tags": ["X线索", "跨境税务", "需回查一手来源"], "site_fulltext": false, "syndicate_fulltext": false, "enabled": false
     },
     {
-      "id": "rss-bair",
-      "name": "Berkeley AI Research",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://bair.berkeley.edu/blog/feed.xml",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T1",
-      "first_party": true,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 180,
-      "tags": [
-        "研究"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
+      "id": "x-kun-crossborder", "name": "X · @kun66666677（资金出海线索）", "kind": "x_search",
+      "config": { "query": "from:kun66666677 -filter:replies", "searchType": "Latest", "_aihot": { "initialBackfillLimit": 8 } },
+      "tier": "T2", "first_party": false, "owner_entity_id": null, "participation_mode": "hot_signal", "interval_minutes": 120,
+      "tags": ["X线索", "资金路径", "需回查一手来源"], "site_fulltext": false, "syndicate_fulltext": false, "enabled": false
     },
     {
-      "id": "rss-the-verge-ai",
-      "name": "The Verge · AI",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 60,
-      "tags": [
-        "媒体"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
+      "id": "x-search-crossborder-tax", "name": "X 高互动搜索 · 跨境税务与海外资产", "kind": "x_search",
+      "config": { "query": "(CRS OR FATCA OR 海外资产 OR 境外收入 OR 税收居民) lang:zh min_faves:10 -filter:replies", "searchType": "Top", "_aihot": { "initialBackfillLimit": 8 } },
+      "tier": "T2", "first_party": false, "owner_entity_id": null, "participation_mode": "hot_signal", "interval_minutes": 180,
+      "tags": ["X线索", "CRS", "FATCA", "需回查一手来源"], "site_fulltext": false, "syndicate_fulltext": false, "enabled": false
     },
     {
-      "id": "rss-techcrunch-ai",
-      "name": "TechCrunch · AI",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://techcrunch.com/category/artificial-intelligence/feed/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 60,
-      "tags": [
-        "媒体"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
-      "id": "rss-ars-technica-ai",
-      "name": "Ars Technica · AI",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://arstechnica.com/ai/feed/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 60,
-      "tags": [
-        "媒体"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
-      "id": "rss-mit-tech-review-ai",
-      "name": "MIT Technology Review · AI",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://www.technologyreview.com/topic/artificial-intelligence/feed",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "媒体"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
-      "id": "rss-the-decoder",
-      "name": "The Decoder",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://the-decoder.com/feed/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 60,
-      "tags": [
-        "媒体"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
-      "id": "rss-simon-willison",
-      "name": "Simon Willison",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://simonwillison.net/atom/everything/",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 120,
-      "tags": [
-        "个人"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
-      "id": "rss-import-ai",
-      "name": "Import AI",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://importai.substack.com/feed",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 180,
-      "tags": [
-        "个人",
-        "周刊"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
-    },
-    {
-      "id": "rss-latent-space",
-      "name": "Latent Space",
-      "kind": "rss",
-      "config": {
-        "feedUrl": "https://www.latent.space/feed",
-        "_aihot": {
-          "initialBackfillLimit": 8
-        }
-      },
-      "tier": "T2",
-      "first_party": false,
-      "owner_entity_id": null,
-      "participation_mode": "editorial",
-      "interval_minutes": 180,
-      "tags": [
-        "个人"
-      ],
-      "site_fulltext": false,
-      "syndicate_fulltext": false
+      "id": "x-search-crossborder-products", "name": "X 高互动搜索 · 跨境产品动态与风险", "kind": "x_search",
+      "config": { "query": "(Wise OR iFAST OR 跨境银行卡 OR 交易所 OR 开户 OR KYC) lang:zh min_faves:5 -filter:replies", "searchType": "Top", "_aihot": { "initialBackfillLimit": 8 } },
+      "tier": "T2", "first_party": false, "owner_entity_id": null, "participation_mode": "hot_signal", "interval_minutes": 120,
+      "tags": ["X线索", "产品动态", "风险/故障", "需回查一手来源"], "site_fulltext": false, "syndicate_fulltext": false, "enabled": false
     }
   ]
 }
