@@ -6,7 +6,7 @@ import type { loader as rootLoader } from "../root";
 import { useChangelogDot } from "../components/shell/Sidebar";
 import { pageMeta } from "../lib/seo";
 import { ThemeSwitch } from "../components/shell/ThemeSwitch";
-import { IconBookmark, IconChart, IconChevronRight, IconFlame, IconGrid, IconHeart, IconHistory, IconMessage, IconMoon, IconPlug } from "../components/icons";
+import { IconBookmark, IconChart, IconCheck, IconChevronRight, IconFlame, IconGrid, IconHeart, IconHistory, IconList, IconMessage, IconMoon, IconPlug } from "../components/icons";
 
 /** Shared caches may keep this page for five minutes. */
 export function headers() {
@@ -23,7 +23,9 @@ const GROUPS: Array<{ title: string; rows: Row[] }> = [
   {
     title: "内容",
     rows: [
+      { to: "/all", label: "全部跨境动态", icon: <IconList size={18} /> },
       { to: "/topics", label: "主题索引", icon: <IconGrid size={18} /> },
+      { to: "/guides", label: "实用避坑", icon: <IconCheck size={18} /> },
       ...(FEATURES.leaderboard ? [{ to: "/leaderboard", label: "模型榜", icon: <IconChart size={18} /> }] : []),
       ...(FEATURES.codexResetMonitor ? [{ to: "/codex-reset", label: "Tibo重置监控", icon: <IconHistory size={18} /> }] : []),
       { to: "/agent", label: "Agent 接入", icon: <IconPlug size={18} /> },

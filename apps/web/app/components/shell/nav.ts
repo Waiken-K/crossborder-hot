@@ -3,7 +3,7 @@ import { withSubject } from "@aihot/industry/site";
 import { FEATURES } from "@aihot/industry/features";
 import type { ReactNode } from "react";
 import {
-  IconApps, IconBolt, IconBookmark, IconChart, IconDoc, IconFlame, IconGrid, IconHeart, IconHistory, IconList, IconMessage, IconPlug,
+  IconApps, IconBolt, IconBookmark, IconChart, IconCheck, IconDoc, IconFlame, IconGrid, IconHeart, IconHistory, IconList, IconMessage, IconPlug,
 } from "../icons";
 
 export interface NavItem {
@@ -23,6 +23,7 @@ export const SIDEBAR: Array<{ title: string; items: NavItem[] }> = [
       { to: "/", label: "精选", icon: IconBolt, end: true },
       { to: "/all", label: `全部${withSubject("动态")}`, icon: IconList },
       { to: "/hot", label: "热点榜", icon: IconFlame },
+      { to: "/guides", label: "实用避坑", icon: IconCheck },
       { to: "/daily", label: withSubject("日报"), icon: IconDoc },
       { to: "/topics", label: "主题", icon: IconGrid },
       { to: "/starred", label: "收藏", icon: IconBookmark },
@@ -53,7 +54,7 @@ export const SIDEBAR: Array<{ title: string; items: NavItem[] }> = [
 
 export const TABBAR: NavItem[] = [
   { to: "/", label: "精选", icon: IconBolt, end: true },
-  { to: "/all", label: "全部", icon: IconList },
+  { to: "/guides", label: "避坑", icon: IconCheck },
   { to: "/daily", label: "日报", icon: IconDoc },
   { to: "/more", label: "更多", icon: IconApps, changelog: true },
 ];

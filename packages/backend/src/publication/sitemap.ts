@@ -44,6 +44,7 @@ async function build(): Promise<SitemapSnapshot> {
     { loc: "/all", lastmod: latest, changefreq: "hourly", priority: 0.9 },
     { loc: "/daily", lastmod: latestDaily?.t, changefreq: "daily", priority: 0.9 },
     { loc: "/hot", lastmod: latest, changefreq: "hourly", priority: 0.9 },
+    { loc: "/guides", lastmod: latest, changefreq: "daily", priority: 0.8 },
     { loc: "/daily/archive", lastmod: latestDaily?.t, changefreq: "daily", priority: 0.7 },
     { loc: "/weekly", changefreq: "weekly", priority: 0.7 },
     { loc: "/monthly", changefreq: "monthly", priority: 0.6 },

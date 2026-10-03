@@ -30,12 +30,16 @@ const api = createServer((req, res) => {
     res.setHeader("Cache-Control", "public, max-age=30, s-maxage=30");
     return res.end(JSON.stringify({ filters, cards: [], nextCursor: null, refreshAt, dayCounts: [], hot: null, generatedAt: "2026-09-28T00:00:00Z" }));
   }
-  if (url.pathname === "/api/site/topics" || url.pathname === "/api/site/topics/test-topic") {
+  if (url.pathname === "/api/site/topics" || url.pathname === "/api/site/topics/test-topic" || url.pathname === "/api/site/topics/practical-guides") {
     res.setHeader("X-Accel-Expires", `@${deadline}`);
     res.setHeader("Cache-Control", "public, max-age=30, s-maxage=30");
     const topic = { slug: "test-topic", name: "测试主题", group: "field", definition: "测试说明", total: 0, recent: 0, indexable: false, latestAt: null, related: [] };
+    const guide = { ...topic, slug: "practical-guides", name: "实操避坑" };
     return res.end(JSON.stringify(url.pathname.endsWith("test-topic")
-      ? { topic, items: [], page: 1, pageCount: 1, refreshAt } : { topics: [topic], refreshAt }));
+      ? { topic, items: [], page: 1, pageCount: 1, refreshAt }
+      : url.pathname.endsWith("practical-guides")
+        ? { topic: guide, items: [], page: 1, pageCount: 1, refreshAt }
+        : { topics: [topic, guide], refreshAt }));
   }
   if (url.pathname === "/api/site/hot") return res.end(JSON.stringify({ entries: [] }));
   if (url.pathname === "/api/site/echo-client") return res.end(JSON.stringify({ forwarded: req.headers["x-forwarded-for"], real: req.headers["x-real-ip"] }));
@@ -252,5 +256,25 @@ test("主题HTML和导航数据共享发布截止，过期上游不得续期", a
       assert.equal(res.headers.get("X-Accel-Expires"), "0");
       await res.text();
     }
+  } finally { deadline = savedDeadline; refreshAt = savedRefresh; }
+});
+
+test("实用避坑入口沿用精选内容的发布截止", async () => {
+  const savedDeadline = deadline;
+  const savedRefresh = refreshAt;
+  try {
+    deadline = Math.floor(Date.now() / 1000) + 20;
+    refreshAt = new Date((deadline + 5) * 1000).toISOString();
+    for (const pathname of ["/guides", "/guides.data"]) {
+      const res = await fetch(origin + pathname);
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get("X-Accel-Expires"), `@${deadline}`);
+      assert.match(await res.text(), pathname.endsWith(".data") ? /practical-guides/ : /实用避坑/);
+    }
+    refreshAt = new Date(Date.now() - 1).toISOString();
+    const expired = await fetch(`${origin}/guides.data`);
+    assert.equal(expired.headers.get("Cache-Control"), "no-cache");
+    assert.equal(expired.headers.get("X-Accel-Expires"), "0");
+    await expired.text();
   } finally { deadline = savedDeadline; refreshAt = savedRefresh; }
 });
