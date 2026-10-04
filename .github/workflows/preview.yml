@@ -1,0 +1,167 @@
+name: Temporary Preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: Keep the public preview online for 15-120 minutes
+        required: false
+        default: "90"
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: crossborder-hot-temporary-preview
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    # A commit containing [preview] starts the first preview without requiring repository secrets.
+    # Later previews can be started manually from the Actions page.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[preview]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.17.0
+          package-manager-cache: false
+
+      - name: Configure an isolated preview
+        env:
+          REQUESTED_MINUTES: ${{ github.event.inputs.duration_minutes || '90' }}
+        run: |
+          case "$REQUESTED_MINUTES" in
+            ''|*[!0-9]*) echo "duration_minutes must be an integer" >&2; exit 1 ;;
+          esac
+          if [ "$REQUESTED_MINUTES" -lt 15 ] || [ "$REQUESTED_MINUTES" -gt 120 ]; then
+            echo "duration_minutes must be between 15 and 120" >&2
+            exit 1
+          fi
+          echo "PREVIEW_MINUTES=$REQUESTED_MINUTES" >> "$GITHUB_ENV"
+          node scripts/init-env.ts --llm-key preview-not-used >/dev/null
+          sed -i 's/^COLLECT_ENABLED=.*/COLLECT_ENABLED=false/' .env
+          sed -i 's/^MODEL_CALLS_ENABLED=.*/MODEL_CALLS_ENABLED=false/' .env
+          sed -i 's|^SITE_URL=.*|SITE_URL=http://127.0.0.1:3000|' .env
+          printf '\nPREVIEW_FIXTURES=true\n' >> .env
+
+      - name: Build and start the application
+        run: |
+          docker compose up -d --build db setup api worker web
+          for i in $(seq 1 90); do
+            if curl --fail --silent --show-error -o /dev/null http://127.0.0.1:3000/api/health; then break; fi
+            if [ "$i" -eq 90 ]; then docker compose logs --tail 200; exit 1; fi
+            sleep 2
+          done
+          docker compose run --rm --no-deps setup node scripts/seed-preview.ts
+          node scripts/smoke.ts --base http://127.0.0.1:3000
+
+      - name: Install pinned tunnel client
+        run: |
+          curl --fail --location --silent --show-error \
+            -o "$RUNNER_TEMP/cloudflared" \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.9.3/cloudflared-linux-amd64
+          echo "77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2  $RUNNER_TEMP/cloudflared" | sha256sum --check
+          chmod 700 "$RUNNER_TEMP/cloudflared"
+
+      - name: Open the temporary HTTPS address
+        id: tunnel
+        run: |
+          "$RUNNER_TEMP/cloudflared" tunnel --url http://127.0.0.1:3000 --no-autoupdate > "$RUNNER_TEMP/cloudflared.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/cloudflared.pid"
+          preview_url=""
+          for i in $(seq 1 60); do
+            preview_url=$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' "$RUNNER_TEMP/cloudflared.log" | head -n 1 || true)
+            [ -n "$preview_url" ] && break
+            if ! kill -0 "$(cat "$RUNNER_TEMP/cloudflared.pid")" 2>/dev/null; then cat "$RUNNER_TEMP/cloudflared.log"; exit 1; fi
+            sleep 2
+          done
+          if [ -z "$preview_url" ]; then cat "$RUNNER_TEMP/cloudflared.log"; exit 1; fi
+          preview_host=${preview_url#https://}
+          sed -i "s|^SITE_URL=.*|SITE_URL=$preview_url|" .env
+          printf 'MCP_ALLOWED_HOSTS=%s\n' "$preview_host" >> .env
+          docker compose up -d --no-deps --force-recreate api worker web
+          for i in $(seq 1 60); do
+            if curl --fail --silent --show-error -o /dev/null "$preview_url/api/health"; then break; fi
+            if [ "$i" -eq 60 ]; then cat "$RUNNER_TEMP/cloudflared.log"; docker compose logs --tail 200; exit 1; fi
+            sleep 2
+          done
+          echo "url=$preview_url" >> "$GITHUB_OUTPUT"
+          {
+            echo "## 跨境热点 · 临时云端预览"
+            echo
+            echo "[$preview_url]($preview_url)"
+            echo
+            echo "合成样例数据；采集与模型调用已关闭。预计保留 $PREVIEW_MINUTES 分钟。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Register the GitHub deployment
+        id: deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_URL: ${{ steps.tunnel.outputs.url }}
+        run: |
+          deployment=$(jq -n \
+            --arg ref "$GITHUB_SHA" \
+            '{ref:$ref, environment:"temporary-preview", description:"Ephemeral crossborder-hot preview", auto_merge:false, required_contexts:[], transient_environment:true, production_environment:false}')
+          response=$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -X POST "https://api.github.com/repos/$GITHUB_REPOSITORY/deployments" \
+            -d "$deployment")
+          deployment_id=$(jq -r .id <<< "$response")
+          echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
+          status=$(jq -n \
+            --arg environment_url "$PREVIEW_URL" \
+            --arg log_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{state:"success", environment_url:$environment_url, log_url:$log_url, description:"Temporary preview is ready"}')
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -X POST "https://api.github.com/repos/$GITHUB_REPOSITORY/deployments/$deployment_id/statuses" \
+            -d "$status" >/dev/null
+
+      - name: Keep the preview online
+        env:
+          PREVIEW_URL: ${{ steps.tunnel.outputs.url }}
+        run: |
+          checks=$((PREVIEW_MINUTES * 2))
+          for i in $(seq 1 "$checks"); do
+            kill -0 "$(cat "$RUNNER_TEMP/cloudflared.pid")"
+            curl --fail --silent --show-error -o /dev/null http://127.0.0.1:3000/api/health
+            if [ $((i % 10)) -eq 0 ]; then curl --fail --silent --show-error -o /dev/null "$PREVIEW_URL/guides"; fi
+            sleep 30
+          done
+
+      - name: Mark the deployment inactive
+        if: always() && steps.deployment.outputs.deployment_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
+        run: |
+          status=$(jq -n \
+            --arg log_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{state:"inactive", log_url:$log_url, description:"Temporary preview has stopped"}')
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -X POST "https://api.github.com/repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses" \
+            -d "$status" >/dev/null
+
+      - name: Diagnostics and cleanup
+        if: always()
+        run: |
+          if [ "${{ job.status }}" != "success" ]; then
+            test ! -f "$RUNNER_TEMP/cloudflared.log" || cat "$RUNNER_TEMP/cloudflared.log"
+            docker compose logs --tail 200 || true
+          fi
+          test ! -f "$RUNNER_TEMP/cloudflared.pid" || kill "$(cat "$RUNNER_TEMP/cloudflared.pid")" 2>/dev/null || true
+          docker compose down -v || true
