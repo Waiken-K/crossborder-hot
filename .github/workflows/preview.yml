@@ -59,7 +59,7 @@ jobs:
             sleep 2
           done
           docker compose run --rm --no-deps setup node scripts/seed-preview.ts
-          node scripts/smoke.ts --base http://127.0.0.1:3000
+          docker compose exec -T web node scripts/smoke.ts --base http://127.0.0.1:3000
 
       - name: Install pinned tunnel client
         run: |
