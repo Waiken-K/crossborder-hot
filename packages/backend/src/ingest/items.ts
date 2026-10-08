@@ -2,7 +2,7 @@
 // rule as every other entrance: old or future-dated items and explicit backfill never count as
 // today's news and are never pushed. Unknown sources are created isolated, awaiting an operator.
 import { sql } from "../db.ts";
-import { upsertMaterial } from "../content/materials.ts";
+import { upsertMaterial, type XPostData } from "../content/materials.ts";
 import { queueProcessing } from "../jobs/content.ts";
 import { normalizeUrl } from "../lib/url.ts";
 
@@ -21,11 +21,40 @@ interface ItemIn {
   url?: unknown;
   publishedAt?: unknown;
   author?: unknown;
+  language?: unknown;
+  excerpt?: unknown;
+  bodyText?: unknown;
+  xPost?: unknown;
   raw?: { _aihot?: { backfill?: boolean; baseline?: boolean } } & Record<string, unknown>;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function optionalText(value: unknown, max: number): string | null {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
+}
+
+/** The small, explicit X shape accepted from a trusted collector; arbitrary browser DOM is never stored as x_post. */
+function parseXPost(value: unknown, index: number): XPostData | null {
+  if (value === undefined || value === null) return null;
+  if (!isObject(value)) throw new IngestError(400, `items[${index}].xPost must be an object`);
+  const tweetId = optionalText(value.tweetId, 32) ?? "";
+  const handle = optionalText(value.handle, 32)?.replace(/^@/, "") ?? "";
+  const text = optionalText(value.text, 50_000) ?? "";
+  if (!/^\d{1,32}$/.test(tweetId) || !/^[A-Za-z0-9_]{1,15}$/.test(handle) || !text) {
+    throw new IngestError(400, `items[${index}].xPost requires a numeric tweetId, valid handle and text`);
+  }
+  return {
+    tweetId,
+    handle,
+    text,
+    authorName: optionalText(value.authorName, 200) ?? `@${handle}`,
+    avatarUrl: optionalText(value.avatarUrl, 2_000),
+    lang: optionalText(value.lang, 32),
+    replyTo: optionalText(value.replyTo, 32),
+  };
 }
 
 export async function ingestItems(body: unknown): Promise<{ ok: true; created: number }> {
@@ -36,8 +65,10 @@ export async function ingestItems(body: unknown): Promise<{ ok: true; created: n
   if (items.length > MAX_ITEMS) throw new IngestError(413, `items[] exceeds max ${MAX_ITEMS} per request`);
   // Validate the entire batch before even updating its source: a malformed later item must not
   // leave earlier items stored. Objects missing a title or URL still follow the documented skip.
+  const xPosts = new Map<number, XPostData | null>();
   for (const [index, item] of items.entries()) {
     if (!isObject(item)) throw new IngestError(400, `items[${index}] must be an object`);
+    xPosts.set(index, parseXPost(item.xPost, index));
   }
 
   const [source] = await sql<{ id: string; participation_mode: string; enabled: boolean }[]>`
@@ -50,7 +81,7 @@ export async function ingestItems(body: unknown): Promise<{ ok: true; created: n
 
   const seen = new Set<string>();
   let created = 0;
-  for (const it of items) {
+  for (const [index, it] of items.entries()) {
     const title = typeof it.title === "string" ? it.title.trim() : "";
     const rawUrl = typeof it.url === "string" ? it.url.trim() : "";
     if (!title || !rawUrl) continue;
@@ -64,12 +95,19 @@ export async function ingestItems(body: unknown): Promise<{ ok: true; created: n
     seen.add(url);
     const published = typeof it.publishedAt === "string" ? new Date(it.publishedAt) : null;
     const flags = it.raw?._aihot ?? {};
+    const xPost = xPosts.get(index) ?? null;
+    const bodyText = optionalText(it.bodyText, 100_000) ?? xPost?.text ?? null;
     const res = await upsertMaterial({
       sourceId: source!.id,
       url,
       title,
       author: typeof it.author === "string" ? it.author.slice(0, 200) : null,
+      language: optionalText(it.language, 32),
       publishedAt: published && Number.isFinite(published.getTime()) ? published : null,
+      excerpt: optionalText(it.excerpt, 2_000),
+      bodyText,
+      bodyStatus: bodyText ? "ok" : "pending",
+      xPost,
       raw: it.raw ?? null,
       via: "ingest",
       backfill: flags.backfill ? "reported-backfill" : flags.baseline ? "reported-baseline" : null,

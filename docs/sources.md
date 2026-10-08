@@ -226,7 +226,15 @@ Content-Type: application/json
   "sourceId": "my-crawler",
   "sourceName": "我的抓取脚本",
   "items": [
-    { "title": "必填", "url": "必填", "publishedAt": "2026-10-01T08:00:00+08:00", "author": "可选" }
+    {
+      "title": "必填",
+      "url": "必填",
+      "publishedAt": "2026-10-01T08:00:00+08:00",
+      "author": "可选",
+      "language": "zh",
+      "excerpt": "可选摘要",
+      "bodyText": "可选正文"
+    }
   ]
 }
 ```
@@ -238,3 +246,4 @@ Content-Type: application/json
 - `sourceId` 不存在时会自动建一个 `external` 信源，默认不进公开页面：到后台把它的参与方式改成 `editorial` 才会出现在站上。
 - 在后台暂停信源后，推送接口返回 409，不再接收新文章；恢复信源后可以继续推送。
 - 条目的 `raw._aihot.backfill` 为 `true` 时按历史回灌处理（不进入“今天”、不推送）。
+- 浏览器采集 X 时还可以传 `xPost`：必须包含数字 `tweetId`、1–15 位账号 `handle` 和 `text`，可带 `authorName`、`avatarUrl`、`lang`、`replyTo`。它会以 `x:<tweetId>` 判重，并完整保存帖子正文；示例见 [`x-capture.example.json`](x-capture.example.json)。

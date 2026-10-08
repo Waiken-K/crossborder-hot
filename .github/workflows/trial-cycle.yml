@@ -1,0 +1,124 @@
+name: Trial Collection Cycle
+
+on:
+  schedule:
+    # Short-lived runner every four hours; the database remains in Neon between runs.
+    - cron: "17 */4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: crossborder-hot-trial-cycle
+  cancel-in-progress: false
+
+jobs:
+  cycle:
+    if: vars.TRIAL_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate trial configuration and derive runtime credentials
+        env:
+          TRIAL_DATABASE_URL: ${{ secrets.TRIAL_DATABASE_URL }}
+          TRIAL_APP_SECRET: ${{ secrets.TRIAL_APP_SECRET }}
+          TRIAL_LLM_API_KEY: ${{ secrets.TRIAL_LLM_API_KEY }}
+          TRIAL_LLM_BASE_URL: ${{ vars.TRIAL_LLM_BASE_URL }}
+          TRIAL_LLM_MODEL: ${{ vars.TRIAL_LLM_MODEL }}
+          TRIAL_LLM_EXTRA_JSON: ${{ vars.TRIAL_LLM_EXTRA_JSON }}
+          TRIAL_SITE_URL: ${{ vars.TRIAL_SITE_URL }}
+          TRIAL_END_AT: ${{ vars.TRIAL_END_AT }}
+        run: |
+          set -euo pipefail
+          [ -n "$TRIAL_DATABASE_URL" ] || { echo "Missing secret TRIAL_DATABASE_URL" >&2; exit 1; }
+          [ "${#TRIAL_APP_SECRET}" -ge 32 ] || { echo "Missing/short secret TRIAL_APP_SECRET" >&2; exit 1; }
+          [ -n "$TRIAL_LLM_API_KEY" ] || { echo "Missing secret TRIAL_LLM_API_KEY" >&2; exit 1; }
+          [ -n "$TRIAL_LLM_MODEL" ] || { echo "Missing variable TRIAL_LLM_MODEL" >&2; exit 1; }
+          if [ -n "$TRIAL_END_AT" ] && [ "$(date -u +%s)" -ge "$(date -u -d "$TRIAL_END_AT" +%s)" ]; then
+            echo "Trial ended at $TRIAL_END_AT; no collection or model call was made." >> "$GITHUB_STEP_SUMMARY"
+            echo "TRIAL_EXPIRED=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          derive() { printf '%s:%s' "$TRIAL_APP_SECRET" "$1" | sha256sum | cut -d' ' -f1; }
+          session_secret=$(derive session)
+          image_secret=$(derive image)
+          admin_password=$(derive admin | cut -c1-24)
+          ingest_token=$(derive ingest)
+          for value in "$session_secret" "$image_secret" "$admin_password" "$ingest_token"; do echo "::add-mask::$value"; done
+          trial_env="$RUNNER_TEMP/trial.env"
+          {
+            echo "NODE_ENV=production"
+            echo "AIHOT_ENVIRONMENT=trial"
+            echo "AIHOT_DATA_DIR=/tmp/aihot-data"
+            echo "DATABASE_URL=$TRIAL_DATABASE_URL"
+            echo "SITE_URL=${TRIAL_SITE_URL:-http://127.0.0.1:3000}"
+            echo "API_BASE_URL=http://127.0.0.1:3001"
+            echo "ADMIN_PASSWORD=$admin_password"
+            echo "SESSION_SECRET=$session_secret"
+            echo "IMG_PROXY_SIGN_SECRET=$image_secret"
+            echo "INGEST_TOKEN=$ingest_token"
+            echo "LLM_BASE_URL=${TRIAL_LLM_BASE_URL:-https://api.openai.com/v1}"
+            echo "LLM_API_KEY=$TRIAL_LLM_API_KEY"
+            echo "LLM_MODEL=$TRIAL_LLM_MODEL"
+            [ -z "$TRIAL_LLM_EXTRA_JSON" ] || echo "LLM_EXTRA_JSON=$TRIAL_LLM_EXTRA_JSON"
+            echo "COLLECT_ENABLED=true"
+            echo "MODEL_CALLS_ENABLED=true"
+            echo "FEISHU_CONTENT_PUSH_ENABLED=false"
+            echo "FEISHU_INTERNAL_ENABLED=false"
+            echo "INDEXNOW_SUBMIT_ENABLED=false"
+            echo "TRIAL_MODE=true"
+          } > "$trial_env"
+          chmod 600 "$trial_env"
+          echo "TRIAL_ENV_FILE=$trial_env" >> "$GITHUB_ENV"
+
+      - name: Pull the tested application image
+        if: env.TRIAL_EXPIRED != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          image_repository="${GITHUB_REPOSITORY,,}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull "ghcr.io/$image_repository:main"
+          echo "TRIAL_IMAGE=ghcr.io/$image_repository:main" >> "$GITHUB_ENV"
+
+      - name: Initialize the persistent database with trial limits
+        if: env.TRIAL_EXPIRED != 'true'
+        run: |
+          docker run --rm --env-file "$TRIAL_ENV_FILE" "$TRIAL_IMAGE" \
+            sh -c 'node scripts/migrate.ts && node scripts/seed.ts && node scripts/prepare-trial.ts'
+
+      - name: Run one bounded collection and AI cycle
+        if: env.TRIAL_EXPIRED != 'true'
+        run: |
+          set -euo pipefail
+          docker run -d --name crossborder-hot-trial-worker --env-file "$TRIAL_ENV_FILE" \
+            "$TRIAL_IMAGE" node apps/worker/src/main.ts
+          # Schedules fire on minute boundaries. Twenty-four minutes covers collection, processing,
+          # grouping, ranking and translation without keeping a server alive all day.
+          for minute in $(seq 1 24); do
+            sleep 60
+            [ "$(docker inspect -f '{{.State.Running}}' crossborder-hot-trial-worker)" = "true" ] || {
+              docker logs crossborder-hot-trial-worker
+              exit 1
+            }
+          done
+          docker stop --time 210 crossborder-hot-trial-worker
+
+      - name: Write the cycle report
+        if: env.TRIAL_EXPIRED != 'true'
+        run: |
+          docker run --rm --env-file "$TRIAL_ENV_FILE" "$TRIAL_IMAGE" node scripts/trial-report.ts \
+            | tee "$RUNNER_TEMP/trial-report.txt"
+          sed -n '/^## 跨境热点/,$p' "$RUNNER_TEMP/trial-report.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Worker logs
+        if: failure() && env.TRIAL_EXPIRED != 'true'
+        run: docker logs --tail 250 crossborder-hot-trial-worker 2>/dev/null || true
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f crossborder-hot-trial-worker 2>/dev/null || true

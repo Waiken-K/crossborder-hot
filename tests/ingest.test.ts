@@ -104,6 +104,39 @@ test("valid batches retain skips, deduplication, backfill and isolated-source de
   assert.deepEqual(repeated.json(), { ok: true, created: 0 });
 });
 
+test("Chrome X reports retain the full post instead of reducing it to a title", async () => {
+  const sourceId = `ingest-x-${T}`;
+  const tweetId = `${Date.now()}123`;
+  const url = `https://x.com/example/status/${tweetId}`;
+  const text = "A complete X post about a cross-border account rule, including the important condition.";
+  const response = await push({
+    sourceId,
+    sourceName: "X · @example (Chrome)",
+    items: [{
+      title: text.slice(0, 60), url, author: "Example", language: "en", bodyText: text,
+      publishedAt: new Date().toISOString(),
+      xPost: { tweetId, handle: "example", authorName: "Example", text, lang: "en" },
+      raw: { collector: "chrome-devtools" },
+    }],
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  const [article] = await sql`SELECT body_text, body_status, language, x_post FROM articles WHERE source_id = ${sourceId}`;
+  assert.equal(article!.body_text, text);
+  assert.equal(article!.body_status, "ok");
+  assert.equal(article!.language, "en");
+  assert.deepEqual(article!.x_post, { tweetId, handle: "example", authorName: "Example", text, avatarUrl: null, lang: "en", replyTo: null });
+});
+
+test("invalid X metadata rejects the whole batch before creating a source", async () => {
+  const sourceId = `ingest-invalid-x-${T}`;
+  const response = await push({
+    sourceId,
+    items: [{ title: "Bad report", url: "https://x.com/example/status/not-a-number", xPost: { tweetId: "nope", handle: "bad handle", text: "text" } }],
+  });
+  assert.equal(response.statusCode, 400, response.body);
+  assert.equal((await sql`SELECT id FROM sources WHERE id = ${sourceId}`).length, 0);
+});
+
 test("empty and oversized batches are rejected before creating a source", async () => {
   const sourceId = `ingest-size-${T}`;
   for (const [items, status] of [[[], 400], [Array.from({ length: 51 }, () => ({})), 413]] as const) {

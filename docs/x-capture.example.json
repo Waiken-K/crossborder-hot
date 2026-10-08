@@ -1,0 +1,25 @@
+{
+  "sourceId": "chrome-x-example",
+  "sourceName": "X · @example（Chrome）",
+  "items": [
+    {
+      "title": "这是一条跨境技巧的简短标题",
+      "url": "https://x.com/example/status/1234567890123456789",
+      "author": "Example",
+      "publishedAt": "2026-10-08T04:00:00.000Z",
+      "language": "zh",
+      "bodyText": "Chrome 读取到的完整帖子正文。",
+      "xPost": {
+        "tweetId": "1234567890123456789",
+        "handle": "example",
+        "authorName": "Example",
+        "text": "Chrome 读取到的完整帖子正文。",
+        "lang": "zh"
+      },
+      "raw": {
+        "collector": "chrome-devtools",
+        "_aihot": { "backfill": false }
+      }
+    }
+  ]
+}

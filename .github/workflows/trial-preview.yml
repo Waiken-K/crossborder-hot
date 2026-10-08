@@ -1,0 +1,171 @@
+name: Persistent Trial Preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: Keep the persistent-data preview online for 15-120 minutes
+        required: false
+        default: "90"
+
+permissions:
+  contents: read
+  packages: read
+  deployments: write
+
+concurrency:
+  group: crossborder-hot-persistent-trial-preview
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    if: vars.TRIAL_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure persistent-data preview
+        env:
+          REQUESTED_MINUTES: ${{ inputs.duration_minutes || '90' }}
+          TRIAL_DATABASE_URL: ${{ secrets.TRIAL_DATABASE_URL }}
+          TRIAL_APP_SECRET: ${{ secrets.TRIAL_APP_SECRET }}
+        run: |
+          set -euo pipefail
+          case "$REQUESTED_MINUTES" in ''|*[!0-9]*) echo "duration_minutes must be an integer" >&2; exit 1;; esac
+          [ "$REQUESTED_MINUTES" -ge 15 ] && [ "$REQUESTED_MINUTES" -le 120 ] || { echo "duration_minutes must be 15-120" >&2; exit 1; }
+          [ -n "$TRIAL_DATABASE_URL" ] || { echo "Missing secret TRIAL_DATABASE_URL" >&2; exit 1; }
+          [ "${#TRIAL_APP_SECRET}" -ge 32 ] || { echo "Missing/short secret TRIAL_APP_SECRET" >&2; exit 1; }
+          derive() { printf '%s:%s' "$TRIAL_APP_SECRET" "$1" | sha256sum | cut -d' ' -f1; }
+          session_secret=$(derive session)
+          image_secret=$(derive image)
+          admin_password=$(derive admin | cut -c1-24)
+          ingest_token=$(derive ingest)
+          for value in "$session_secret" "$image_secret" "$admin_password" "$ingest_token"; do echo "::add-mask::$value"; done
+          trial_env="$RUNNER_TEMP/trial-preview.env"
+          {
+            echo "NODE_ENV=production"
+            echo "AIHOT_ENVIRONMENT=trial-preview"
+            echo "AIHOT_DATA_DIR=/tmp/aihot-data"
+            echo "DATABASE_URL=$TRIAL_DATABASE_URL"
+            echo "SITE_URL=http://127.0.0.1:3000"
+            echo "API_BASE_URL=http://127.0.0.1:3001"
+            echo "LOCAL_ROUTER_URL=http://127.0.0.1:3000"
+            echo "API_HOST=0.0.0.0"
+            echo "WEB_HOST=0.0.0.0"
+            echo "ADMIN_PASSWORD=$admin_password"
+            echo "SESSION_SECRET=$session_secret"
+            echo "IMG_PROXY_SIGN_SECRET=$image_secret"
+            echo "INGEST_TOKEN=$ingest_token"
+            echo "COLLECT_ENABLED=false"
+            echo "MODEL_CALLS_ENABLED=false"
+            echo "FEISHU_CONTENT_PUSH_ENABLED=false"
+            echo "FEISHU_INTERNAL_ENABLED=false"
+            echo "INDEXNOW_SUBMIT_ENABLED=false"
+          } > "$trial_env"
+          chmod 600 "$trial_env"
+          echo "PREVIEW_MINUTES=$REQUESTED_MINUTES" >> "$GITHUB_ENV"
+          echo "TRIAL_ENV_FILE=$trial_env" >> "$GITHUB_ENV"
+
+      - name: Pull image and start the read-only application roles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          image_repository="${GITHUB_REPOSITORY,,}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull "ghcr.io/$image_repository:main"
+          echo "TRIAL_IMAGE=ghcr.io/$image_repository:main" >> "$GITHUB_ENV"
+          docker run --rm --env-file "$TRIAL_ENV_FILE" "ghcr.io/$image_repository:main" sh -c 'node scripts/migrate.ts && node scripts/seed.ts'
+          docker run -d --name crossborder-hot-trial-api --network host --env-file "$TRIAL_ENV_FILE" \
+            "ghcr.io/$image_repository:main" node apps/api/src/main.ts
+          docker run -d --name crossborder-hot-trial-web --network host --env-file "$TRIAL_ENV_FILE" \
+            "ghcr.io/$image_repository:main" node apps/web/server.ts
+          for i in $(seq 1 60); do
+            curl -fsS -o /dev/null http://127.0.0.1:3000/api/health 2>/dev/null && break
+            if [ "$i" -eq 60 ]; then docker logs crossborder-hot-trial-api; docker logs crossborder-hot-trial-web; exit 1; fi
+            sleep 2
+          done
+
+      - name: Install pinned tunnel client
+        run: |
+          curl --fail --location --silent --show-error -o "$RUNNER_TEMP/cloudflared" \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.9.3/cloudflared-linux-amd64
+          echo "77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2  $RUNNER_TEMP/cloudflared" | sha256sum --check
+          chmod 700 "$RUNNER_TEMP/cloudflared"
+
+      - name: Open the temporary HTTPS address
+        id: tunnel
+        run: |
+          "$RUNNER_TEMP/cloudflared" tunnel --url http://127.0.0.1:3000 --no-autoupdate > "$RUNNER_TEMP/cloudflared.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/cloudflared.pid"
+          preview_url=""
+          for i in $(seq 1 60); do
+            preview_url=$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' "$RUNNER_TEMP/cloudflared.log" | head -n 1 || true)
+            [ -n "$preview_url" ] && break
+            sleep 2
+          done
+          [ -n "$preview_url" ] || { cat "$RUNNER_TEMP/cloudflared.log"; exit 1; }
+          preview_host=${preview_url#https://}
+          sed -i "s|^SITE_URL=.*|SITE_URL=$preview_url|" "$TRIAL_ENV_FILE"
+          echo "MCP_ALLOWED_HOSTS=$preview_host" >> "$TRIAL_ENV_FILE"
+          docker rm -f crossborder-hot-trial-api crossborder-hot-trial-web
+          docker run -d --name crossborder-hot-trial-api --network host --env-file "$TRIAL_ENV_FILE" "$TRIAL_IMAGE" node apps/api/src/main.ts
+          docker run -d --name crossborder-hot-trial-web --network host --env-file "$TRIAL_ENV_FILE" "$TRIAL_IMAGE" node apps/web/server.ts
+          for i in $(seq 1 60); do
+            curl -fsS -o /dev/null "$preview_url/api/health" 2>/dev/null && break
+            if [ "$i" -eq 60 ]; then cat "$RUNNER_TEMP/cloudflared.log"; exit 1; fi
+            sleep 2
+          done
+          echo "url=$preview_url" >> "$GITHUB_OUTPUT"
+          {
+            echo "## 跨境热点 · 持久数据试运行预览"
+            echo
+            echo "[$preview_url]($preview_url)"
+            echo
+            echo "读取 Neon 中的真实试运行数据；本次只提供 API/页面，不会采集或调用模型。预计保留 $PREVIEW_MINUTES 分钟。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Register GitHub deployment
+        id: deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_URL: ${{ steps.tunnel.outputs.url }}
+        run: |
+          deployment=$(jq -n --arg ref "$GITHUB_SHA" '{ref:$ref,environment:"trial-preview",description:"Persistent trial-data preview",auto_merge:false,required_contexts:[],transient_environment:true,production_environment:false}')
+          response=$(curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -X POST "https://api.github.com/repos/$GITHUB_REPOSITORY/deployments" -d "$deployment")
+          deployment_id=$(jq -r .id <<< "$response")
+          echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
+          status=$(jq -n --arg environment_url "$PREVIEW_URL" --arg log_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" '{state:"success",environment_url:$environment_url,log_url:$log_url,description:"Persistent trial preview is ready"}')
+          curl --fail --silent -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -X POST "https://api.github.com/repos/$GITHUB_REPOSITORY/deployments/$deployment_id/statuses" -d "$status" >/dev/null
+
+      - name: Keep preview online
+        env:
+          PREVIEW_URL: ${{ steps.tunnel.outputs.url }}
+        run: |
+          for minute in $(seq 1 "$PREVIEW_MINUTES"); do
+            sleep 60
+            curl --fail --silent --show-error -o /dev/null "$PREVIEW_URL/api/health"
+          done
+
+      - name: Mark deployment inactive
+        if: always() && steps.deployment.outputs.deployment_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
+        run: |
+          curl --fail --silent -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+            -X POST "https://api.github.com/repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses" \
+            -d '{"state":"inactive","description":"Persistent trial preview ended"}' >/dev/null
+
+      - name: Logs
+        if: failure()
+        run: |
+          docker logs --tail 200 crossborder-hot-trial-api 2>/dev/null || true
+          docker logs --tail 200 crossborder-hot-trial-web 2>/dev/null || true
+          cat "$RUNNER_TEMP/cloudflared.log" 2>/dev/null || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f crossborder-hot-trial-api crossborder-hot-trial-web 2>/dev/null || true
+          if [ -f "$RUNNER_TEMP/cloudflared.pid" ]; then kill "$(cat "$RUNNER_TEMP/cloudflared.pid")" 2>/dev/null || true; fi

@@ -122,7 +122,7 @@ docker compose up -d --build
 
 打开 <http://localhost:3000>。后台在 `/admin`，管理员密码在 `.env` 的 `ADMIN_PASSWORD` 里。一两分钟后开始有内容，第一次导入的资料大约半小时处理完。
 
-机器上没有 Node、服务器在中国大陆、要配域名和 HTTPS，见 [部署](docs/deploy.md)。
+机器上没有 Node、服务器在中国大陆、要配域名和 HTTPS，见 [部署](docs/deploy.md)。还没买服务器、想先用持久数据跑几天，见 [零服务器试运行](docs/work-package-6.md)。
 
 ## 把它改成你的行业
 
@@ -158,6 +158,7 @@ docker compose up -d --build
 | [精选与校准](docs/selection.md) | 一条资料怎么变成精选，怎么用自己的样本校准 |
 | [事件归组与关系评测](docs/grouping.md) | 事件关系怎么判断，怎么用自己的 pairwise gold set 评测 |
 | [部署](docs/deploy.md) | Docker、域名和 HTTPS、中国大陆、更新、备份、花多少钱 |
+| [零服务器试运行](docs/work-package-6.md) | Neon 持久数据、GitHub 定时短跑、临时预览、本机 Chrome 采集 X |
 | [云端开发与持续集成](docs/cloud-development.md) | Codex Cloud、固定工具链、环境模板与 CI 验收 |
 | [架构](docs/architecture.md) | 三个进程、几条不变的规则、目录、对外出口 |
 | [模型榜与 Codex 重置监控](docs/leaderboard.md) | 两个 AI 专属模块 |
