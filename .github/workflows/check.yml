@@ -77,6 +77,13 @@ jobs:
       # After the smoke check, which reads an empty database: these write their own rows.
       - name: Backend tests
         run: npm test
+      - name: Trial-mode database scripts
+        env:
+          TRIAL_MODE: "true"
+        run: |
+          node scripts/prepare-trial.ts
+          node scripts/trial-report.ts > "$RUNNER_TEMP/trial-report.txt"
+          grep -q "跨境热点 · 试运行报告" "$RUNNER_TEMP/trial-report.txt"
       - name: Server logs
         if: failure()
         run: tail -n 60 "$RUNNER_TEMP/api.log" "$RUNNER_TEMP/web.log" 2>/dev/null || true
